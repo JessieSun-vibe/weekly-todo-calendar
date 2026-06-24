@@ -1,0 +1,52 @@
+<script lang="ts">
+  const {
+    key,
+    value,
+    onpointerup,
+  }: {
+    // todo: once lucide-svelte supports Svelte 5, remove this
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    key?: any;
+    value: string;
+    onpointerup?: () => void;
+  } = $props();
+</script>
+
+{#if value}
+  <span class={["pill", onpointerup && "clickable"]} {onpointerup}>
+    {#if !key}{:else if typeof key === "string"}
+      {key}:
+    {:else}
+      {@const Component = key}
+
+      <Component class="planner-pill-icon" />
+    {/if}
+    {value}
+  </span>
+{/if}
+
+<style>
+  :global(.planner-pill-icon) {
+    flex-shrink: 0;
+    width: var(--size-4-3);
+    height: var(--size-4-3);
+  }
+
+  .pill {
+    display: inline-flex;
+    gap: var(--size-4-1);
+    align-items: center;
+
+    padding: var(--size-2-1) var(--size-4-2);
+
+    font-size: var(--font-ui-small);
+    color: var(--text-muted);
+
+    border: var(--border-base);
+    border-radius: var(--radius-m);
+  }
+
+  .pill.clickable:hover {
+    border-color: var(--color-accent);
+  }
+</style>
