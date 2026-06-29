@@ -45,6 +45,12 @@ export type PointerDateTime = {
 
 export type Signal<T> = { current: T };
 
+export interface WeeklyFocusItem {
+  lineNumber: number;
+  status: string;
+  text: string;
+}
+
 export interface ObsidianContext {
   workspaceFacade: WorkspaceFacade;
   periodicNotes: PeriodicNotes;
@@ -71,6 +77,12 @@ export interface ObsidianContext {
     position: { line: number; col: number };
     contents: string;
   }) => Promise<void>;
+  getWeeklyFocusItems: () => Promise<WeeklyFocusItem[]>;
+  updateWeeklyFocusItem: (lineNumber: number, text: string) => Promise<void>;
+  toggleWeeklyFocusItem: (lineNumber: number) => Promise<void>;
+  addWeeklyFocusItem: () => Promise<void>;
+  deleteWeeklyFocusItem: (lineNumber: number) => Promise<void>;
+  reorderWeeklyFocusItems: (lineNumbers: number[]) => Promise<void>;
   deleteLines: (target: {
     path: string;
     position: {

@@ -30,6 +30,7 @@ export interface DayPlannerSettings {
   appleCalendarName: string;
   autoOpenWeeklyTodo: boolean;
   progressIndicator: "mini-timeline" | "pie" | "bar" | "none";
+  weeklyFocusLayout: "horizontal" | "vertical";
   showTaskNotification: boolean;
   zoomLevel: number;
   timelineIcon: string;
@@ -71,6 +72,7 @@ export interface DayPlannerSettings {
 export const defaultSettings: DayPlannerSettings = {
   appleCalendarName: "个人",
   autoOpenWeeklyTodo: true,
+  weeklyFocusLayout: "horizontal",
   snapStepMinutes: 10,
   progressIndicator: "mini-timeline",
   showTaskNotification: false,

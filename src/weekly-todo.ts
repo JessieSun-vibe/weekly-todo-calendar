@@ -5,6 +5,7 @@ import {
   Platform,
   type Plugin,
   type TFile,
+  TFolder,
 } from "obsidian";
 
 import type { DayPlannerSettings } from "./settings";
@@ -35,6 +36,9 @@ type SyncResult = {
 };
 
 const calendarIdRegExp = /\[calendar-id::\s*([A-Za-z0-9_-]+)\]/;
+const currentWeekPrefix = "📍 ";
+const pastFolderName = "001-Past";
+const futureFolderName = "002-Future";
 
 function createCalendarId() {
   return `wtc_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -115,6 +119,44 @@ function parseEvents(content: string): ParsedEvent[] {
     .filter((event): event is ParsedEvent => event !== null);
 }
 
+function stripCurrentWeekPrefix(value: string) {
+  return value.startsWith(currentWeekPrefix)
+    ? value.slice(currentWeekPrefix.length)
+    : value;
+}
+
+function getWeeklyCalendarWindowState() {
+  return window as typeof window & {
+    __obsidianWeeklyCalendarFilePath?: string;
+  };
+}
+
+function setCurrentWeekMarkers(content: string, isCurrentWeek: boolean) {
+  let lines = content
+    .split("\n")
+    .filter((line) => !/^current-week:\s*/.test(line));
+  const frontmatterEnd = lines.findIndex((line, index) => {
+    return index > 0 && line.trim() === "---";
+  });
+
+  if (isCurrentWeek && frontmatterEnd > 0) {
+    lines.splice(frontmatterEnd, 0, "current-week: true");
+  }
+
+  lines = lines.map((line) => {
+    if (!/^#\s+/.test(line)) {
+      return line;
+    }
+
+    const title = line.replace(/^#\s+/, "");
+    const normalizedTitle = stripCurrentWeekPrefix(title);
+
+    return `# ${isCurrentWeek ? currentWeekPrefix : ""}${normalizedTitle}`;
+  });
+
+  return lines.join("\n");
+}
+
 export class WeeklyTodoFeature {
   private allowSourceOnce = false;
   private isSyncing = false;
@@ -127,9 +169,14 @@ export class WeeklyTodoFeature {
   ) {}
 
   load() {
+    this.app.workspace.onLayoutReady(() => {
+      window.setTimeout(() => void this.archiveWeeklyTodoFiles(), 300);
+    });
+
     this.plugin.registerEvent(
       this.app.workspace.on("file-open", (file) => {
         if (!file || file.extension !== "md") return;
+        window.setTimeout(() => void this.archiveWeeklyTodoFiles(), 20);
         window.setTimeout(() => this.routeWeeklyTodo(file), 80);
       }),
     );
@@ -221,6 +268,120 @@ export class WeeklyTodoFeature {
       type: "planner-weekly",
       active: true,
     });
+  }
+
+  private async ensureFolder(path: string) {
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFolder) {
+      return;
+    }
+
+    if (existing) {
+      throw new Error(`${path} exists but is not a folder.`);
+    }
+
+    await this.app.vault.createFolder(path);
+  }
+
+  private getWeekRelation(frontmatter: Record<string, unknown>) {
+    const weekStart = window.moment(
+      String(frontmatter["week-start"] || ""),
+      "YYYY-MM-DD",
+      true,
+    );
+    const weekEnd = window.moment(
+      String(frontmatter["week-end"] || ""),
+      "YYYY-MM-DD",
+      true,
+    );
+    const today = window.moment().startOf("day");
+
+    if (!weekStart.isValid() || !weekEnd.isValid()) {
+      return undefined;
+    }
+
+    if (weekEnd.isBefore(today, "day")) {
+      return "past" as const;
+    }
+
+    if (weekStart.isAfter(today, "day")) {
+      return "future" as const;
+    }
+
+    return "present" as const;
+  }
+
+  private getCalendarRoot(file: TFile) {
+    return file.path.split("/")[0];
+  }
+
+  private async archiveWeeklyTodoFiles() {
+    const weeklyFiles = this.app.vault.getMarkdownFiles().filter((file) => {
+      return (
+        this.app.metadataCache.getFileCache(file)?.frontmatter?.type ===
+        "weekly-todo"
+      );
+    });
+
+    for (const file of weeklyFiles) {
+      const frontmatter =
+        this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (!frontmatter) continue;
+
+      const relation = this.getWeekRelation(frontmatter);
+      if (!relation) continue;
+
+      const calendarRoot = this.getCalendarRoot(file);
+      const targetFolder =
+        relation === "past"
+          ? `${calendarRoot}/${pastFolderName}`
+          : relation === "future"
+            ? `${calendarRoot}/${futureFolderName}`
+            : calendarRoot;
+      const fileNameWithoutPin = stripCurrentWeekPrefix(file.name);
+      const targetFileName =
+        relation === "present"
+          ? `${currentWeekPrefix}${fileNameWithoutPin}`
+          : fileNameWithoutPin;
+      const targetPath = `${targetFolder}/${targetFileName}`;
+
+      if (relation !== "present") {
+        await this.ensureFolder(targetFolder);
+      }
+
+      const content = await this.app.vault.read(file);
+      const nextContent = setCurrentWeekMarkers(
+        content,
+        relation === "present",
+      );
+      if (nextContent !== content) {
+        await this.app.vault.modify(file, nextContent);
+      }
+
+      if (file.path === targetPath) {
+        if (relation === "present") {
+          this.lastWeeklyFilePath = targetPath;
+          getWeeklyCalendarWindowState().__obsidianWeeklyCalendarFilePath =
+            targetPath;
+        }
+        continue;
+      }
+
+      if (this.app.vault.getAbstractFileByPath(targetPath)) {
+        console.warn(
+          `Weekly Todo archive target already exists, skipping: ${targetPath}`,
+        );
+        continue;
+      }
+
+      await this.app.vault.rename(file, targetPath);
+
+      if (relation === "present") {
+        this.lastWeeklyFilePath = targetPath;
+        getWeeklyCalendarWindowState().__obsidianWeeklyCalendarFilePath =
+          targetPath;
+      }
+    }
   }
 
   private async openWeeklySource() {

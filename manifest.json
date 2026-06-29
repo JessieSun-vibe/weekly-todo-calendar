@@ -1,7 +1,7 @@
 {
   "id": "weekly-todo-calendar",
   "name": "Weekly Todo Calendar",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "minAppVersion": "1.5.0",
   "description": "Weekly Todo pages, editable calendar views, and Apple Calendar sync.",
   "author": "JessieSun",

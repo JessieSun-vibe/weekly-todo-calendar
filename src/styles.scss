@@ -150,12 +150,13 @@
 
   .view-content {
     display: grid;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     grid-template-columns: auto 1fr auto auto;
     grid-template-areas:
-      "corner dates settings"
-      "corner multiday settings"
-      "ruler timelines settings";
+      "corner dates settings settings"
+      "corner multiday settings settings"
+      "ruler timelines settings settings"
+      "focus focus settings settings";
   }
 
   .view-actions {

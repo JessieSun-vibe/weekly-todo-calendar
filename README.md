@@ -7,6 +7,11 @@ Weekly notes open directly as an editable Monday–Sunday calendar. Timed tasks 
 ## Features
 
 - Open weekly Todo notes directly in a full-week calendar.
+- Plan weekly focus items below the calendar, with editable cards, progress,
+  horizontal or vertical layouts, collapse/expand, drag-and-drop sorting, and
+  quick delete actions.
+- Automatically keep the current week in the calendar folder while routing past
+  weeks to `001-Past` and future weeks to `002-Future`.
 - Drag, resize, create, complete, and edit timed tasks in the calendar.
 - Keep the calendar source as portable Markdown.
 - Use compact week titles such as `0622-0628`.

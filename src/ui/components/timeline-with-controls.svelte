@@ -5,13 +5,11 @@
   import { getObsidianContext } from "../../context/obsidian-context";
   import { getVisibleHours } from "../../global-store/derived-settings";
   import { settings } from "../../global-store/settings";
-  import type { Task } from "../../task-types";
   import { createColumnSelectionMenu } from "../column-selection-menu";
 
-  import BlockList from "./block-list.svelte";
   import ControlButton from "./control-button.svelte";
   import ErrorBoundary from "./error-boundary.svelte";
-  import { EllipsisVertical } from "./lucide";
+  import { EllipsisVertical, LayoutGrid, List } from "./lucide";
   import Tree from "./obsidian/tree.svelte";
   import ResizeHandle from "./resize-handle.svelte";
   import ResizeableBox from "./resizeable-box.svelte";
@@ -44,15 +42,39 @@
       type: "date",
     });
   }
+
+  function toggleWeeklyFocusLayout() {
+    $settings = {
+      ...$settings,
+      weeklyFocusLayout:
+        $settings.weeklyFocusLayout === "vertical" ? "horizontal" : "vertical",
+    };
+  }
 </script>
 
 <ErrorBoundary>
   <TimelineControls />
 
   {#if $settings.showUncheduledTasks}
-    <Tree title="All day events">
+    <Tree title="每周重点计划">
       {#snippet flair()}
         {String(displayedAllDayTasks.length)}
+      {/snippet}
+      {#snippet controls()}
+        <ControlButton
+          --border-radius="0"
+          isActive={$settings.weeklyFocusLayout === "vertical"}
+          label={$settings.weeklyFocusLayout === "vertical"
+            ? "切换为横向平铺"
+            : "切换为纵向列表"}
+          onclick={toggleWeeklyFocusLayout}
+        >
+          {#if $settings.weeklyFocusLayout === "vertical"}
+            <LayoutGrid class="planner-settings-icon" />
+          {:else}
+            <List class="planner-settings-icon" />
+          {/if}
+        </ControlButton>
       {/snippet}
       {#if editOperation.current || displayedAllDayTasks.length > 0}
         <ResizeableBox
@@ -66,14 +88,21 @@
                 Drag blocks here to schedule all-day tasks
               </div>
             {:else if displayedAllDayTasks.length > 0}
-              <BlockList list={displayedAllDayTasks}>
-                {#snippet match(task: Task)}
+              <div
+                class={[
+                  "weekly-focus-task-container",
+                  $settings.weeklyFocusLayout === "vertical" &&
+                    "is-vertical-list",
+                ]}
+              >
+                {#each displayedAllDayTasks as task (task.id)}
                   <UnscheduledTimeBlock
-                    --time-block-padding="var(--size-2-1) 0"
+                    --time-block-padding="0"
+                    --time-block-width="var(--weekly-focus-card-width)"
                     {task}
                   />
-                {/snippet}
-              </BlockList>
+                {/each}
+              </div>
             {/if}
             <ResizeHandle on:mousedown={startEdit} />
           {/snippet}
@@ -119,6 +148,38 @@
 
   :global(.unscheduled-task-container) {
     overflow: auto;
+  }
+
+  .weekly-focus-task-container {
+    --weekly-focus-card-width: min(320px, 100%);
+
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--size-4-2);
+
+    padding: var(--size-4-1) var(--size-4-2);
+
+    transition:
+      gap 160ms ease,
+      padding 160ms ease;
+  }
+
+  .weekly-focus-task-container.is-vertical-list {
+    --weekly-focus-card-width: 100%;
+
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  .weekly-focus-task-container :global(.padding) {
+    flex: 0 1 var(--weekly-focus-card-width);
+    max-width: 100%;
+    padding: 0;
+
+    transition:
+      flex-basis 180ms ease,
+      width 180ms ease;
   }
 
   .edit-prompt {

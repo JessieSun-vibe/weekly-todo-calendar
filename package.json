@@ -1,6 +1,6 @@
 {
   "name": "weekly-todo-calendar",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Weekly Todo pages, editable calendar views, and Apple Calendar sync for Obsidian",
   "main": "main.js",
   "scripts": {

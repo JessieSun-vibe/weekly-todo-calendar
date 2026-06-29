@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { fromStore, get, type Readable, type Writable } from "svelte/store";
 import { isNotVoid } from "typed-assert";
 
@@ -56,7 +56,12 @@ import { WorkspaceFacade } from "./service/workspace-facade";
 import { type DayPlannerSettings, defaultSettings } from "./settings";
 import type { LocalTask, RemoteTask } from "./task-types";
 import { createGetTasksApi } from "./tasks-plugin";
-import type { ObsidianContext, OnUpdateFn, PointerDateTime } from "./types";
+import type {
+  ObsidianContext,
+  OnUpdateFn,
+  PointerDateTime,
+  WeeklyFocusItem,
+} from "./types";
 import { askForConfirmation } from "./ui/confirmation-modal";
 import { createEditorMenuCallback } from "./ui/editor-menu";
 import { useDateRanges } from "./ui/hooks/use-date-ranges";
@@ -75,6 +80,137 @@ import { createShowPreview } from "./util/create-show-preview";
 import { notifyAboutStartedTasks } from "./util/notify-about-started-tasks";
 import { createBackgroundBatchScheduler } from "./util/scheduler";
 import { WeeklyTodoFeature } from "./weekly-todo";
+
+const weeklyFocusHeading = "本周重点";
+
+function getWeeklyCalendarWindowState() {
+  return window as typeof window & {
+    __obsidianWeeklyCalendarFilePath?: string;
+  };
+}
+
+function findWeeklyFocusSection(lines: string[]) {
+  const headingIndex = lines.findIndex((line) => {
+    return /^#{1,6}\s+/.test(line) && line.replace(/^#+\s+/, "").trim() === weeklyFocusHeading;
+  });
+
+  if (headingIndex < 0) {
+    return undefined;
+  }
+
+  const headingDepth = lines[headingIndex].match(/^#+/)?.[0].length ?? 2;
+  const nextHeadingIndex = lines.findIndex((line, index) => {
+    if (index <= headingIndex || !/^#{1,6}\s+/.test(line)) {
+      return false;
+    }
+
+    const depth = line.match(/^#+/)?.[0].length ?? 7;
+
+    return depth <= headingDepth;
+  });
+
+  return {
+    start: headingIndex,
+    end: nextHeadingIndex < 0 ? lines.length : nextHeadingIndex,
+  };
+}
+
+function getWeeklyFocusItemsFromContents(contents: string): WeeklyFocusItem[] {
+  const lines = contents.split("\n");
+  const section = findWeeklyFocusSection(lines);
+  if (!section) return [];
+
+  return lines
+    .slice(section.start + 1, section.end)
+    .map((line, index) => {
+      const match = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
+      if (!match) return undefined;
+
+      return {
+        lineNumber: section.start + 1 + index,
+        status: match[2],
+        text: match[3],
+      };
+    })
+    .filter((item): item is WeeklyFocusItem => item !== undefined);
+}
+
+function updateWeeklyFocusLine(contents: string, lineNumber: number, text: string) {
+  const lines = contents.split("\n");
+  const line = lines[lineNumber];
+  isNotVoid(line, `No line #${lineNumber} in weekly focus section`);
+  const match = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
+  isNotVoid(match, `Line #${lineNumber} is not a weekly focus task`);
+
+  lines[lineNumber] = `${match[1]}- [${match[2]}] ${text.trim()}`;
+
+  return lines.join("\n");
+}
+
+function appendWeeklyFocusLine(contents: string) {
+  const lines = contents.split("\n");
+  let section = findWeeklyFocusSection(lines);
+
+  if (!section) {
+    const separator = contents.trimEnd().length > 0 ? ["", `## ${weeklyFocusHeading}`, ""] : [`## ${weeklyFocusHeading}`, ""];
+    lines.push(...separator, "- [ ] ");
+    return lines.join("\n");
+  }
+
+  lines.splice(section.end, 0, "- [ ] ");
+
+  return lines.join("\n");
+}
+
+function deleteWeeklyFocusLine(contents: string, lineNumber: number) {
+  const lines = contents.split("\n");
+  const line = lines[lineNumber];
+  isNotVoid(line, `No line #${lineNumber} in weekly focus section`);
+
+  if (!/^\s*-\s*\[[ xX]\]\s*/.test(line)) {
+    throw new Error(`Line #${lineNumber} is not a weekly focus task`);
+  }
+
+  lines.splice(lineNumber, 1);
+
+  return lines.join("\n");
+}
+
+function reorderWeeklyFocusLines(contents: string, lineNumbers: number[]) {
+  const lines = contents.split("\n");
+  const section = findWeeklyFocusSection(lines);
+  if (!section) return contents;
+
+  const taskLineNumbers = lines
+    .slice(section.start + 1, section.end)
+    .map((line, index) => ({
+      line,
+      lineNumber: section.start + 1 + index,
+    }))
+    .filter(({ line }) => /^\s*-\s*\[[ xX]\]\s*/.test(line))
+    .map(({ lineNumber }) => lineNumber);
+
+  const taskLineNumberSet = new Set(taskLineNumbers);
+  const orderedLineNumbers = lineNumbers.filter((lineNumber) =>
+    taskLineNumberSet.has(lineNumber),
+  );
+
+  if (orderedLineNumbers.length !== taskLineNumbers.length) {
+    return contents;
+  }
+
+  const orderedLines = orderedLineNumbers.map((lineNumber) => {
+    const line = lines[lineNumber];
+    isNotVoid(line, `No line #${lineNumber} in weekly focus section`);
+    return line;
+  });
+
+  taskLineNumbers.forEach((lineNumber, index) => {
+    lines[lineNumber] = orderedLines[index];
+  });
+
+  return lines.join("\n");
+}
 
 export default class DayPlanner extends Plugin {
   settings!: () => DayPlannerSettings;
@@ -587,12 +723,122 @@ export default class DayPlanner extends Plugin {
         initialText,
         getDescriptionText,
       });
+    const getCurrentWeeklyTodoFile = () => {
+      const filePath = getWeeklyCalendarWindowState()
+        .__obsidianWeeklyCalendarFilePath;
+      const activeFile = this.app.workspace.getActiveFile();
+      const currentWeeklyFile = this.app.vault.getMarkdownFiles().find((file) => {
+        const frontmatter =
+          this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (frontmatter?.type !== "weekly-todo") {
+          return false;
+        }
+
+        if (frontmatter["current-week"] === true) {
+          return true;
+        }
+
+        const weekStart = window.moment(
+          String(frontmatter["week-start"] || ""),
+          "YYYY-MM-DD",
+          true,
+        );
+        const weekEnd = window.moment(
+          String(frontmatter["week-end"] || ""),
+          "YYYY-MM-DD",
+          true,
+        );
+
+        return (
+          weekStart.isValid() &&
+          weekEnd.isValid() &&
+          window.moment().isBetween(weekStart, weekEnd, "day", "[]")
+        );
+      });
+      const file =
+        (filePath
+          ? this.app.vault.getAbstractFileByPath(filePath)
+          : activeFile) ||
+        activeFile ||
+        currentWeeklyFile;
+
+      if (!(file instanceof TFile)) {
+        new Notice("Open a weekly Todo calendar first.");
+        return undefined;
+      }
+
+      return file;
+    };
+    const refreshWeeklyFocusFile = (path: string) => {
+      dispatch(indexRequested([path]));
+    };
+    const getWeeklyFocusItems: ObsidianContext["getWeeklyFocusItems"] =
+      async () => {
+        const file = getCurrentWeeklyTodoFile();
+        if (!file) return [];
+
+        return getWeeklyFocusItemsFromContents(
+          await this.app.vault.read(file),
+        );
+      };
+    const updateWeeklyFocusItem: ObsidianContext["updateWeeklyFocusItem"] =
+      async (lineNumber, text) => {
+        const file = getCurrentWeeklyTodoFile();
+        if (!file) return;
+
+        await this.vaultFacade.editFile(file.path, (contents) =>
+          updateWeeklyFocusLine(contents, lineNumber, text),
+        );
+        refreshWeeklyFocusFile(file.path);
+      };
+    const toggleWeeklyFocusItem: ObsidianContext["toggleWeeklyFocusItem"] =
+      async (lineNumber) => {
+        const file = getCurrentWeeklyTodoFile();
+        if (!file) return;
+
+        await this.vaultFacade.toggleCheckboxInFile(file.path, lineNumber);
+        refreshWeeklyFocusFile(file.path);
+      };
+    const addWeeklyFocusItem: ObsidianContext["addWeeklyFocusItem"] =
+      async () => {
+        const file = getCurrentWeeklyTodoFile();
+        if (!file) return;
+
+        await this.vaultFacade.editFile(file.path, appendWeeklyFocusLine);
+        refreshWeeklyFocusFile(file.path);
+      };
+    const deleteWeeklyFocusItem: ObsidianContext["deleteWeeklyFocusItem"] =
+      async (lineNumber) => {
+        const file = getCurrentWeeklyTodoFile();
+        if (!file) return;
+
+        await this.vaultFacade.editFile(file.path, (contents) =>
+          deleteWeeklyFocusLine(contents, lineNumber),
+        );
+        refreshWeeklyFocusFile(file.path);
+      };
+    const reorderWeeklyFocusItems: ObsidianContext["reorderWeeklyFocusItems"] =
+      async (lineNumbers) => {
+        const file = getCurrentWeeklyTodoFile();
+        if (!file) return;
+
+        await this.vaultFacade.editFile(file.path, (contents) =>
+          reorderWeeklyFocusLines(contents, lineNumbers),
+        );
+        refreshWeeklyFocusFile(file.path);
+      };
 
     const defaultObsidianContext: ObsidianContext = {
       periodicNotes: this.periodicNotes,
       taskEntryEditor: this.taskEntryEditor,
       editText,
       editLine,
+      getWeeklyFocusItems,
+      updateWeeklyFocusItem,
+      toggleWeeklyFocusItem,
+      addWeeklyFocusItem,
+      deleteWeeklyFocusItem,
+      reorderWeeklyFocusItems,
       deleteLines,
       workspaceFacade: this.workspaceFacade,
       initWeeklyView: this.initWeeklyLeaf,
