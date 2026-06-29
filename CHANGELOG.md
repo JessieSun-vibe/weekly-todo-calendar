@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Add an editable weekly focus plan below the weekly calendar.
+- Support weekly focus add, edit, check off, delete, right-click delete, collapse/expand, horizontal/vertical layout, and drag-and-drop sorting.
+- Persist weekly focus changes back to the `## 本周重点` Markdown section.
+- Automatically route past weekly files to `001-Past`, future weekly files to `002-Future`, and keep the current week at the calendar folder root.
+- Update weekly focus styling to follow Obsidian light and dark themes.
+
 ## 1.1.1
 
 - Publish the full source tree so Obsidian Community automated review can inspect the plugin source.
